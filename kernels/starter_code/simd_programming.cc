@@ -60,13 +60,23 @@ void MatmulOperator::mat_mul_simd_programming(struct matmul_params *params) {
                 // Hint:
                 // (1) use `vandq_u8` with the mask_low4bit to get the lower half
                 // (2) use `vshrq_n_u8` to right shift 4 bits and get the upper half
-                // (3) use `vreinterpretq_s8_u8` to interpret the  vector as int8
+                // (3) use `vreinterpretq_s8_u8` to interpret the vector as int8
                 // lowbit mask
                 const uint8x16_t mask_low4bit = vdupq_n_u8(0xf);
+
+                // decode the lower and upper half of the weights
+                uint8x16_t weights_low = vandq_u8(w0, mask_low4bit);
+                uint8x16_t weights_high = vshrq_n_u8(w0, 0x4);
+                int8x16_t weights_low_int8 = vreinterpretq_s8_u8(weights_low);
+                int8x16_t weights_high_int8 = vreinterpretq_s8_u8(weights_high);
 
                 // TODO: apply zero_point to weights and convert the range from (0, 15) to (-8, 7)
                 // Hint: using `vsubq_s8` to the lower-half and upper-half vectors of weights
                 const int8x16_t offsets = vdupq_n_s8(8);
+
+                // sub 8
+                weights_low_int8 = vsubq_s8(weights_low_int8, offsets);
+                weights_high_int8 = vsubq_s8(weights_high_int8, offsets);
 
                 // load 32 8-bit activation
                 const int8x16_t a0 = vld1q_s8(a_start);
@@ -77,7 +87,11 @@ void MatmulOperator::mat_mul_simd_programming(struct matmul_params *params) {
                 // Hint: use `vdotq_s32` to compute sumv0 = a0 * lower-half weights + a1 * upper-half weights
                 // int32x4 vector to store intermediate sum
                 int32x4_t int_sum0;
-
+                int32x4_t tmp_1;
+                int32x4_t tmp_2;
+                int_sum0 = vdotq_s32(tmp_1, a0, weights_low_int8);
+                int_sum0 += vdotq_s32(tmp_2, a1, weights_high_int8);
+                // int_sum0 = vaddq_s32(tmp_1, tmp_2);
                 float s_0 = *s_a++ * *s_w++;
                 sumv0 = vmlaq_n_f32(sumv0, vcvtq_f32_s32(int_sum0), s_0);
             }

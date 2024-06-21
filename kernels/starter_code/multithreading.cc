@@ -96,6 +96,8 @@ static void* multithreading_worker_func(void* args) {
     return NULL;
 }
 
+#include <vector>
+
 namespace matmul {
 void MatmulOperator::mat_mul_multithreading(struct matmul_params* params) {
     const struct matrix *A = &params->A, *B = &params->B, *C = &params->C;
@@ -109,8 +111,24 @@ void MatmulOperator::mat_mul_multithreading(struct matmul_params* params) {
     pthread_t thread_pool[num_thread];
     struct multithreading_thread_args threads_args[num_thread];
 
-    // TODO: Thread creation
+    // Calculate the number of columns each thread will process
+    int cols_per_thread = n / num_thread;
 
-    // TODO: Join threads
+    // Create threads
+    for (int i = 0; i < num_thread; i++) {
+        int start_col = i * cols_per_thread;
+        int end_col = (i == num_thread - 1) ? n : (i + 1) * cols_per_thread;
+
+        threads_args[i].start = start_col;
+        threads_args[i].end = end_col;
+        threads_args[i].params = params;
+
+        pthread_create(&thread_pool[i], NULL, multithreading_worker_func, (void*)&threads_args[i]);
+    }
+
+    // Join threads
+    for (int i = 0; i < num_thread; i++) {
+        pthread_join(thread_pool[i], NULL);
+    }
 };
 }  // namespace matmul

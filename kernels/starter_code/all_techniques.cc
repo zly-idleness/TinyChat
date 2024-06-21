@@ -66,11 +66,33 @@ static void *all_techniques_worker_func(void *args) {
                 // (3) use `vreinterpretq_s8_u8` to interpret the  vector as int8
                 // lowbit mask
                 const uint8x16_t mask_low4bit = vdupq_n_u8(0xf);
-
+                uint8x16_t w0_l = vandq_u8(w0, mask_low4bit);
+                uint8x16_t w0_h = vshrq_n_u8(w0, 4);
+                uint8x16_t w1_l = vandq_u8(w1, mask_low4bit);
+                uint8x16_t w1_h = vshrq_n_u8(w1, 4);
+                uint8x16_t w2_l = vandq_u8(w2, mask_low4bit);
+                uint8x16_t w2_h = vshrq_n_u8(w2, 4);
+                uint8x16_t w3_l = vandq_u8(w3, mask_low4bit);
+                uint8x16_t w3_h = vshrq_n_u8(w3, 4);
+                int8x16_t w0_l_int8 = vreinterpretq_s8_u8(w0_l);
+                int8x16_t w0_h_int8 = vreinterpretq_s8_u8(w0_h);
+                int8x16_t w1_l_int8 = vreinterpretq_s8_u8(w1_l);
+                int8x16_t w1_h_int8 = vreinterpretq_s8_u8(w1_h);
+                int8x16_t w2_l_int8 = vreinterpretq_s8_u8(w2_l);
+                int8x16_t w2_h_int8 = vreinterpretq_s8_u8(w2_h);
+                int8x16_t w3_l_int8 = vreinterpretq_s8_u8(w3_l);
+                int8x16_t w3_h_int8 = vreinterpretq_s8_u8(w3_h);
                 // TODO: apply zero_point to weights and convert the range from (0, 15) to (-8, 7)
                 // Hint: using `vsubq_s8` to the lower-half and upper-half vectors of weights
                 const int8x16_t offsets = vdupq_n_s8(8);
-
+                w0_l_int8 = vsubq_s8(w0_l_int8, offsets);
+                w0_h_int8 = vsubq_s8(w0_h_int8, offsets);
+                w1_l_int8 = vsubq_s8(w1_l_int8, offsets);
+                w1_h_int8 = vsubq_s8(w1_h_int8, offsets);
+                w2_l_int8 = vsubq_s8(w2_l_int8, offsets);
+                w2_h_int8 = vsubq_s8(w2_h_int8, offsets);
+                w3_l_int8 = vsubq_s8(w3_l_int8, offsets);
+                w3_h_int8 = vsubq_s8(w3_h_int8, offsets);
                 // load 128 8-bit activation
                 const int8x16_t a0 = vld1q_s8(a_start);
                 const int8x16_t a1 = vld1q_s8(a_start + 16);
@@ -85,6 +107,20 @@ static void *all_techniques_worker_func(void *args) {
                 // TODO: perform dot product and store the result into the intermediate sum, int_sum0
                 // Hint: use `vdotq_s32` and store the sum for each block in int_sum{0-3}
                 int32x4_t int_sum0, int_sum1, int_sum2, int_sum3;
+
+                int32x4_t tmp_1;
+                int32x4_t tmp_2;
+                int_sum0 = vdotq_s32(tmp_1, a0, w0_l_int8);
+                int_sum0 += vdotq_s32(tmp_2, a1, w0_h_int8);
+
+                int_sum1 = vdotq_s32(tmp_1, a2, w1_l_int8);
+                int_sum1 += vdotq_s32(tmp_2, a3, w1_h_int8);
+
+                int_sum2 = vdotq_s32(tmp_1, a4, w2_l_int8);
+                int_sum2 += vdotq_s32(tmp_2, a5, w2_h_int8);
+
+                int_sum3 = vdotq_s32(tmp_1, a6, w3_l_int8);
+                int_sum3 += vdotq_s32(tmp_2, a7, w3_h_int8);
 
                 float s_0 = *s_a++ * *s_w++;
                 float s_1 = *s_a++ * *s_w++;
@@ -221,8 +257,25 @@ void MatmulOperator::mat_mul_all_techniques(struct matmul_params *params) {
     struct w4a8_thread_args threads_args[num_thread];
     assert(params->block_size == 32);  // support block size 32 for now
 
-    // TODO: Thread creation
+    // Calculate the number of columns each thread will process
 
-    // TODO: Join threads
+    int m = C->row, n = C->column;
+    int cols_per_thread = n / num_thread;
+    // Create threads
+    for (int i = 0; i < num_thread; i++) {
+        int start_col = i * cols_per_thread;
+        int end_col = (i == num_thread - 1) ? n : (i + 1) * cols_per_thread;
+
+        threads_args[i].start_j = start_col;
+        threads_args[i].end_j = end_col;
+        threads_args[i].params = params;
+
+        pthread_create(&thread_pool[i], NULL, all_techniques_worker_func, (void *)&threads_args[i]);
+    }
+
+    // Join threads
+    for (int i = 0; i < num_thread; i++) {
+        pthread_join(thread_pool[i], NULL);
+    }
 };
 }  // namespace matmul
